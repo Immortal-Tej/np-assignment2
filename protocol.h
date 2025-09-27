@@ -4,7 +4,7 @@
 
 #else
 
-#error *** do not use this platform
+// #error *** do not use this platform
 
 #endif
 
