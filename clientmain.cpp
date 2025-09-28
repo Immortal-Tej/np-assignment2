@@ -163,8 +163,89 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    cout << "Protocol negotiation successful. Assignment received." << endl;
-    
+    int op = assignment.arith;
+    bool isFloat = (op >= 5);
+    int intRes = 0;
+    double floatRes = 0.0;
+
+    if (!isFloat) {
+        int a = assignment.inValue1;
+        int b = assignment.inValue2;
+        string opName;
+        if (op == 1) { intRes = a + b; opName = "add"; }
+        else if (op == 2) { intRes = a - b; opName = "sub"; }
+        else if (op == 3) { intRes = a * b; opName = "mul"; }
+        else if (op == 4) { intRes = a / b; opName = "div"; }
+        cout << "ASSIGNMENT: " << opName << " " << a << " " << b << endl;
+        DEBUG_PRINT("Calculated the result to " << intRes);
+    } else {
+        double a = assignment.flValue1;
+        double b = assignment.flValue2;
+        string opName;
+        if (op == 5) { floatRes = a + b; opName = "fadd"; }
+        else if (op == 6) { floatRes = a - b; opName = "fsub"; }
+        else if (op == 7) { floatRes = a * b; opName = "fmul"; }
+        else if (op == 8) { floatRes = a / b; opName = "fdiv"; }
+        cout << "ASSIGNMENT: " << opName << " " << a << " " << b << endl;
+        DEBUG_PRINT("Calculated the result to " << floatRes);
+    }
+
+    struct calcProtocol reply;
+    memset(&reply, 0, sizeof(reply));
+    reply.type = htons(2);
+    reply.major_version = htons(1);
+    reply.minor_version = htons(0);
+    reply.id = htonl(assignment.id);
+    reply.arith = htonl(assignment.arith);
+    reply.inValue1 = htonl(assignment.inValue1);
+    reply.inValue2 = htonl(assignment.inValue2);
+
+    if (!isFloat) {
+        reply.inResult = htonl(intRes);
+    } else {
+        reply.flValue1 = assignment.flValue1;
+        reply.flValue2 = assignment.flValue2;
+        reply.flResult = floatRes;
+    }
+
+    struct calcMessage finalMsg;
+
+    int bytes2 = sendWithRetry(sock, &reply, sizeof(reply),
+                               &finalMsg, sizeof(finalMsg),
+                               res->ai_addr, res->ai_addrlen);
+
+    if (bytes2 < 0) {
+        cout << "ERROR: server did not reply after result" << endl;
+        close(sock);
+        freeaddrinfo(res);
+        return 1;
+    }
+
+    if (bytes2 != sizeof(finalMsg)) {
+        cout << "ERROR WRONG SIZE OR INCORRECT PROTOCOL" << endl;
+        close(sock);
+        freeaddrinfo(res);
+        return 1;
+    }
+
+    finalMsg.type = ntohs(finalMsg.type);
+    finalMsg.message = ntohl(finalMsg.message);
+    finalMsg.protocol = ntohs(finalMsg.protocol);
+    finalMsg.major_version = ntohs(finalMsg.major_version);
+    finalMsg.minor_version = ntohs(finalMsg.minor_version);
+
+    if (finalMsg.message == 1) {
+        cout << "OK (myresult=";
+        if (!isFloat) cout << intRes;
+        else cout << floatRes;
+        cout << ")" << endl;
+    } else {
+        cout << "NOT OK (myresult=";
+        if (!isFloat) cout << intRes;
+        else cout << floatRes;
+        cout << ")" << endl;
+    }
+
     close(sock);
     freeaddrinfo(res);
     return 0;
