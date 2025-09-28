@@ -11,10 +11,15 @@
 #include <unistd.h>
 
 #include <calcLib.h>
-#include "protocol.h"
+#include "protocol.h" 
 
 using namespace std;
 
+#ifdef DEBUG
+#define DEBUG_PRINT(x) do { cout << x << endl; } while(0)
+#else
+#define DEBUG_PRINT(x) do {} while(0)
+#endif
 bool splitHostPort(string input, string &host, string &port) {
     if (input.empty()) return false;
 
@@ -36,18 +41,13 @@ bool splitHostPort(string input, string &host, string &port) {
     return true;
 }
 
-#ifdef DEBUG
-#define DEBUG_PRINT(x) do { cout << x << endl; } while(0)
-#else
-#define DEBUG_PRINT(x) do {} while(0)
-#endif
-
 int sendWithRetry(int sock, const void *msg, size_t msgSize,
                   void *reply, size_t replySize,
                   struct sockaddr *serverAddr, socklen_t addrLen) {
     int tries = 0;
     while (tries < 3) {
         sendto(sock, msg, msgSize, 0, serverAddr, addrLen);
+
         int bytes = recvfrom(sock, reply, replySize, 0, NULL, NULL);
         if (bytes > 0) {
             return bytes;
@@ -124,13 +124,12 @@ int main(int argc, char *argv[]) {
     firstMsg.type = htons(22);
     firstMsg.message = htonl(0);
     firstMsg.protocol = htons(17);
-    firstMsg.major_version = htons(1);
+    firstMsg.major_version = htons(1);   
     firstMsg.minor_version = htons(0);
 
-    struct calcProtocol assignment;
-
+    char buffer[sizeof(calcProtocol)];
     int bytes = sendWithRetry(sock, &firstMsg, sizeof(firstMsg),
-                              &assignment, sizeof(assignment),
+                              buffer, sizeof(buffer),
                               res->ai_addr, res->ai_addrlen);
 
     if (bytes < 0) {
@@ -140,12 +139,32 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (bytes != sizeof(assignment)) {
+    if (bytes == sizeof(calcMessage)) {
+        struct calcMessage *rejectMsg = (struct calcMessage*)buffer;
+        rejectMsg->type = ntohs(rejectMsg->type);
+        rejectMsg->message = ntohl(rejectMsg->message);
+        rejectMsg->major_version = ntohs(rejectMsg->major_version);
+        rejectMsg->minor_version = ntohs(rejectMsg->minor_version);
+        if (rejectMsg->type == 2 && rejectMsg->message == 2 && 
+            rejectMsg->major_version == 1 && rejectMsg->minor_version == 0) {
+            cout << "NOT OK" << endl;
+        } else {
+            cout << "ERROR WRONG SIZE OR INCORRECT PROTOCOL" << endl;
+        }
+        close(sock);
+        freeaddrinfo(res);
+        return 1;
+    }
+
+    if (bytes != sizeof(calcProtocol)) {
         cout << "ERROR WRONG SIZE OR INCORRECT PROTOCOL" << endl;
         close(sock);
         freeaddrinfo(res);
         return 1;
     }
+
+    struct calcProtocol assignment;
+    memcpy(&assignment, buffer, sizeof(assignment));
 
     assignment.type = ntohs(assignment.type);
     assignment.major_version = ntohs(assignment.major_version);
@@ -155,9 +174,9 @@ int main(int argc, char *argv[]) {
     assignment.inValue1 = ntohl(assignment.inValue1);
     assignment.inValue2 = ntohl(assignment.inValue2);
     assignment.inResult = ntohl(assignment.inResult);
-
-    if (assignment.major_version != 1 || assignment.minor_version != 0) {
-        cout << "Server replied with unsupported version" << endl;
+    
+    if (assignment.type != 1 || assignment.major_version != 1 || assignment.minor_version != 0) {
+        cout << "ERROR WRONG SIZE OR INCORRECT PROTOCOL" << endl;
         close(sock);
         freeaddrinfo(res);
         return 1;
@@ -209,7 +228,6 @@ int main(int argc, char *argv[]) {
     }
 
     struct calcMessage finalMsg;
-
     int bytes2 = sendWithRetry(sock, &reply, sizeof(reply),
                                &finalMsg, sizeof(finalMsg),
                                res->ai_addr, res->ai_addrlen);
